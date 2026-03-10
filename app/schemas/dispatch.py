@@ -13,6 +13,10 @@ class DriverCreate(BaseModel):
     current_longitude: float
     is_available: bool = True
 
+class DriverLocationUpdate(BaseModel):
+    current_latitude: float
+    current_longitude: float
+    is_available: Optional[bool] = None
 
 class DriverResponse(BaseModel):
     id: int
@@ -41,6 +45,8 @@ class DispatchJobResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class DispatchStatusUpdate(BaseModel):
+    status: str
 
 class DispatchStatusUpdate(BaseModel):
     status: Literal["en_route", "arrived", "completed", "cancelled"]

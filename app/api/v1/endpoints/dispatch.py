@@ -9,9 +9,12 @@ from app.db.models.driver import Driver
 from app.db.models.service_request import ServiceRequest
 from app.schemas.dispatch import (
     DispatchJobResponse,
+    DispatchStatusUpdate,
     DriverCreate,
+    DriverLocationUpdate,
     DriverResponse,
 )
+
 from app.services.dispatch.assignment import assign_nearest_driver
 
 from app.schemas.dispatch import (
@@ -19,6 +22,19 @@ from app.schemas.dispatch import (
     DispatchStatusUpdate,
     DriverCreate,
     DriverResponse,
+)
+
+from app.schemas.dispatch import (
+    DispatchJobResponse,
+    DriverCreate,
+    DriverLocationUpdate,
+    DriverResponse,
+)
+
+from app.services.notifications.sms import (
+    notify_customer_driver_arriving,
+    notify_customer_job_assigned,
+    notify_customer_job_completed,
 )
 
 router = APIRouter()
@@ -63,6 +79,34 @@ def list_drivers(
 
     return query.order_by(Driver.id.desc()).all()
 
+@router.patch("/drivers/{driver_id}/location", response_model=DriverResponse)
+def update_driver_location(
+    driver_id: int,
+    payload: DriverLocationUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    query = db.query(Driver).filter(Driver.id == driver_id)
+    if tenant_id:
+        query = query.filter(Driver.tenant_id == tenant_id)
+
+    driver = query.first()
+
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    driver.current_latitude = payload.current_latitude
+    driver.current_longitude = payload.current_longitude
+
+    if payload.is_available is not None:
+        driver.is_available = payload.is_available
+
+    db.commit()
+    db.refresh(driver)
+
+    return driver
 
 @router.post("/assign/{service_request_id}", response_model=DispatchJobResponse)
 def assign_dispatch_job(
@@ -106,8 +150,9 @@ def assign_dispatch_job(
     db.commit()
     db.refresh(dispatch_job)
 
-    return dispatch_job
+    notify_customer_job_assigned(service_request, driver, dispatch_job)
 
+    return dispatch_job
 
 @router.get("/jobs", response_model=List[DispatchJobResponse])
 def list_dispatch_jobs(
@@ -121,6 +166,110 @@ def list_dispatch_jobs(
         query = query.filter(DispatchJob.tenant_id == tenant_id)
 
     return query.order_by(DispatchJob.id.desc()).all()
+
+@router.patch("/jobs/{job_id}/status", response_model=DispatchJobResponse)
+def update_dispatch_status(
+    job_id: int,
+    payload: DispatchStatusUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    query = db.query(DispatchJob).filter(DispatchJob.id == job_id)
+
+    if tenant_id:
+        query = query.filter(DispatchJob.tenant_id == tenant_id)
+
+    job = query.first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Dispatch job not found")
+
+    valid_statuses = [
+        "assigned",
+        "en_route",
+        "arrived",
+        "completed",
+        "cancelled",
+    ]
+
+    if payload.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of {valid_statuses}",
+        )
+
+    job.status = payload.status
+
+    service_request = db.query(ServiceRequest).filter(
+        ServiceRequest.id == job.service_request_id
+    ).first()
+
+    if service_request:
+        service_request.status = payload.status
+
+    if payload.status in ["completed", "cancelled"]:
+        driver = db.query(Driver).filter(Driver.id == job.driver_id).first()
+        if driver:
+            driver.is_available = True
+
+    db.commit()
+    db.refresh(job)
+
+    if service_request and payload.status == "arrived":
+        notify_customer_driver_arriving(service_request)
+
+    if service_request and payload.status == "completed":
+        notify_customer_job_completed(service_request)
+
+    return job
+
+@router.patch("/jobs/{job_id}/status", response_model=DispatchJobResponse)
+def update_dispatch_status(
+    job_id: int,
+    payload: DispatchStatusUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    query = db.query(DispatchJob).filter(DispatchJob.id == job_id)
+
+    if tenant_id:
+        query = query.filter(DispatchJob.tenant_id == tenant_id)
+
+    job = query.first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Dispatch job not found")
+
+    valid_statuses = [
+        "assigned",
+        "en_route",
+        "arrived",
+        "completed",
+        "cancelled",
+    ]
+
+    if payload.status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be one of {valid_statuses}",
+        )
+
+    job.status = payload.status
+
+    # if job completed, free the driver
+    if payload.status in ["completed", "cancelled"]:
+        driver = db.query(Driver).filter(Driver.id == job.driver_id).first()
+        if driver:
+            driver.is_available = True
+
+    db.commit()
+    db.refresh(job)
+
+    return job
 
 @router.post("/jobs/{dispatch_job_id}/status", response_model=DispatchJobResponse)
 def update_dispatch_job_status(
