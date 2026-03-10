@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 
 from pydantic import BaseModel
 
@@ -40,3 +40,7 @@ class DispatchJobResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DispatchStatusUpdate(BaseModel):
+    status: Literal["en_route", "arrived", "completed", "cancelled"]
