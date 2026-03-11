@@ -221,3 +221,70 @@ def update_dispatch_status(
         notify_customer_job_completed(service_request)
 
     return job
+
+@router.get("/jobs/active", response_model=list[DispatchJobResponse])
+def list_active_jobs(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("tenant_admin", "dispatcher")),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    query = db.query(DispatchJob).filter(
+        DispatchJob.status.in_(["assigned", "en_route", "arrived"])
+    )
+
+    if tenant_id:
+        query = query.filter(DispatchJob.tenant_id == tenant_id)
+
+    jobs = query.all()
+
+    return jobs
+
+@router.get("/jobs/{job_id}", response_model=DispatchJobResponse)
+def get_dispatch_job(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("tenant_admin", "dispatcher")),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    query = db.query(DispatchJob).filter(DispatchJob.id == job_id)
+
+    if tenant_id:
+        query = query.filter(DispatchJob.tenant_id == tenant_id)
+
+    job = query.first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Dispatch job not found")
+
+    return job
+
+@router.get("/dashboard/summary")
+def dashboard_summary(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("tenant_admin", "dispatcher")),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    request_query = db.query(ServiceRequest)
+    driver_query = db.query(Driver)
+    job_query = db.query(DispatchJob)
+
+    if tenant_id:
+        request_query = request_query.filter(ServiceRequest.tenant_id == tenant_id)
+        driver_query = driver_query.filter(Driver.tenant_id == tenant_id)
+        job_query = job_query.filter(DispatchJob.tenant_id == tenant_id)
+
+    return {
+        "pending_requests": request_query.filter(ServiceRequest.status == "pending").count(),
+        "active_jobs": job_query.filter(
+            DispatchJob.status.in_(["assigned", "en_route", "arrived"])
+        ).count(),
+        "available_drivers": driver_query.filter(Driver.is_available == True).count(),  # noqa: E712
+        "total_drivers": driver_query.count(),
+    }
+
