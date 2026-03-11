@@ -36,6 +36,7 @@ def create_driver(
 
     driver = Driver(
         tenant_id=tenant_id,
+        user_id=payload.user_id,
         name=payload.name,
         phone=payload.phone,
         truck_number=payload.truck_number,
@@ -197,11 +198,9 @@ def update_dispatch_status(
 
     job.status = payload.status
 
-    service_request = (
-        db.query(ServiceRequest)
-        .filter(ServiceRequest.id == job.service_request_id)
-        .first()
-    )
+    service_request = db.query(ServiceRequest).filter(
+        ServiceRequest.id == job.service_request_id
+    ).first()
 
     if service_request:
         service_request.status = payload.status
@@ -222,7 +221,8 @@ def update_dispatch_status(
 
     return job
 
-@router.get("/jobs/active", response_model=list[DispatchJobResponse])
+
+@router.get("/jobs/active", response_model=List[DispatchJobResponse])
 def list_active_jobs(
     request: Request,
     db: Session = Depends(get_db),
@@ -237,9 +237,8 @@ def list_active_jobs(
     if tenant_id:
         query = query.filter(DispatchJob.tenant_id == tenant_id)
 
-    jobs = query.all()
+    return query.order_by(DispatchJob.id.desc()).all()
 
-    return jobs
 
 @router.get("/jobs/{job_id}", response_model=DispatchJobResponse)
 def get_dispatch_job(
@@ -261,6 +260,7 @@ def get_dispatch_job(
         raise HTTPException(status_code=404, detail="Dispatch job not found")
 
     return job
+
 
 @router.get("/dashboard/summary")
 def dashboard_summary(
@@ -287,4 +287,3 @@ def dashboard_summary(
         "available_drivers": driver_query.filter(Driver.is_available == True).count(),  # noqa: E712
         "total_drivers": driver_query.count(),
     }
-

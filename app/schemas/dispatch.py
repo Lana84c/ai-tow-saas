@@ -1,10 +1,11 @@
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional
 
 from pydantic import BaseModel
 
 
 class DriverCreate(BaseModel):
+    user_id: Optional[int] = None
     name: str
     phone: Optional[str] = None
     truck_number: Optional[str] = None
@@ -13,14 +14,17 @@ class DriverCreate(BaseModel):
     current_longitude: float
     is_available: bool = True
 
+
 class DriverLocationUpdate(BaseModel):
     current_latitude: float
     current_longitude: float
     is_available: Optional[bool] = None
 
+
 class DriverResponse(BaseModel):
     id: int
     tenant_id: Optional[str] = None
+    user_id: Optional[int] = None
     name: str
     phone: Optional[str] = None
     truck_number: Optional[str] = None
@@ -45,8 +49,6 @@ class DispatchJobResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-class DispatchStatusUpdate(BaseModel):
-    status: str
 
 class DispatchStatusUpdate(BaseModel):
-    status: Literal["en_route", "arrived", "completed", "cancelled"]
+    status: str
