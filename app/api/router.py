@@ -1,4 +1,6 @@
 from fastapi import APIRouter
+from app.api.v1.endpoints import public_status
+from app.api.v1.endpoints import fleet
 
 from app.api.v1.endpoints import (
     admin,
@@ -6,6 +8,19 @@ from app.api.v1.endpoints import (
     dispatch,
     driver,
     public_chat,
+    service_requests,
+    tenants,
+)
+
+from app.api.v1.endpoints import (
+    admin,
+    auth,
+    dispatch,
+    driver,
+    fleet,
+    public_chat,
+    public_status,
+    realtime,
     service_requests,
     tenants,
 )
@@ -52,4 +67,21 @@ api_router.include_router(
     admin.router,
     prefix="/admin",
     tags=["Admin"],
+)
+
+api_router.include_router(
+    public_status.router,
+    prefix="/public",
+    tags=["Public Tracking"],
+)
+
+api_router.include_router(
+    fleet.router,
+    prefix="/fleet",
+    tags=["Fleet Map"],
+)
+
+api_router.include_router(
+    realtime.router,
+    tags=["Realtime"],
 )

@@ -10,11 +10,13 @@ from app.db.models.service_request import ServiceRequest
 from app.db.models.user import User
 from app.schemas.dispatch import (
     DispatchJobResponse,
+    DispatchReassignRequest,
     DispatchStatusUpdate,
     DriverCreate,
     DriverLocationUpdate,
     DriverResponse,
 )
+from app.services.dispatch.eta import get_route_eta_and_distance
 from app.services.dispatch.assignment import assign_nearest_driver
 from app.services.notifications.sms import (
     notify_customer_driver_arriving,
@@ -145,6 +147,81 @@ def assign_dispatch_job(
     notify_customer_job_assigned(service_request, driver, dispatch_job)
 
     return dispatch_job
+
+
+@router.post("/reassign/{job_id}", response_model=DispatchJobResponse)
+def reassign_dispatch_job(
+    job_id: int,
+    payload: DispatchReassignRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("tenant_admin", "dispatcher")),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+
+    job_query = db.query(DispatchJob).filter(DispatchJob.id == job_id)
+    if tenant_id:
+        job_query = job_query.filter(DispatchJob.tenant_id == tenant_id)
+
+    job = job_query.first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Dispatch job not found")
+
+    service_request = db.query(ServiceRequest).filter(
+        ServiceRequest.id == job.service_request_id
+    ).first()
+
+    if not service_request:
+        raise HTTPException(status_code=404, detail="Service request not found")
+
+    new_driver_query = db.query(Driver).filter(Driver.id == payload.new_driver_id)
+    if tenant_id:
+        new_driver_query = new_driver_query.filter(Driver.tenant_id == tenant_id)
+
+    new_driver = new_driver_query.first()
+
+    if not new_driver:
+        raise HTTPException(status_code=404, detail="New driver not found")
+
+    if not new_driver.is_available:
+        raise HTTPException(status_code=400, detail="Selected driver is not available")
+
+    if new_driver.current_latitude is None or new_driver.current_longitude is None:
+        raise HTTPException(status_code=400, detail="Selected driver has no location")
+
+    if service_request.latitude is None or service_request.longitude is None:
+        raise HTTPException(status_code=400, detail="Service request has no location")
+
+    old_driver = None
+    if job.driver_id:
+        old_driver = db.query(Driver).filter(Driver.id == job.driver_id).first()
+
+    distance_miles, eta_minutes = get_route_eta_and_distance(
+        origin_lat=new_driver.current_latitude,
+        origin_lng=new_driver.current_longitude,
+        destination_lat=service_request.latitude,
+        destination_lng=service_request.longitude,
+    )
+
+    if old_driver:
+        old_driver.is_available = True
+
+    new_driver.is_available = False
+
+    job.driver_id = new_driver.id
+    job.status = "assigned"
+    job.estimated_distance_miles = distance_miles
+    job.estimated_eta_minutes = eta_minutes
+
+    service_request.status = "assigned"
+
+    db.commit()
+    db.refresh(job)
+
+    notify_customer_job_assigned(service_request, new_driver, job)
+
+    return job
 
 
 @router.get("/jobs", response_model=List[DispatchJobResponse])

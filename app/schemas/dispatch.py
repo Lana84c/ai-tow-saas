@@ -52,3 +52,7 @@ class DispatchJobResponse(BaseModel):
 
 class DispatchStatusUpdate(BaseModel):
     status: str
+
+
+class DispatchReassignRequest(BaseModel):
+    new_driver_id: int

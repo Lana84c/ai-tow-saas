@@ -2,6 +2,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from app.services.realtime.connection_manager import manager
 
 from app.api.deps import get_db, require_roles
 from app.db.models.dispatch_job import DispatchJob
@@ -53,7 +54,7 @@ def get_my_driver_jobs(
 
 
 @router.patch("/location", response_model=DriverResponse)
-def update_my_driver_location(
+async def update_my_driver_location(
     payload: DriverLocationUpdate,
     request: Request,
     db: Session = Depends(get_db),
@@ -75,8 +76,21 @@ def update_my_driver_location(
     db.commit()
     db.refresh(driver)
 
-    return driver
+    if tenant_id:
+        await manager.broadcast_to_tenant(
+            tenant_id,
+            {
+                "type": "driver_location_update",
+                "driver_id": driver.id,
+                "name": driver.name,
+                "truck_number": driver.truck_number,
+                "latitude": driver.current_latitude,
+                "longitude": driver.current_longitude,
+                "available": driver.is_available,
+            },
+        )
 
+    return driver
 
 @router.patch("/jobs/{job_id}/status", response_model=DispatchJobResponse)
 def update_my_job_status(
